@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Target Shooting Game</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            flex-direction: column;
+        }
+        canvas {
+            border: 1px solid black;
+        }
+        #resetButton {
+            margin-top: 20px;
+        }
+        #chartContainer {
+            width: 50%;
+            height: 300px;
+            margin-top: 20px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <canvas id="targetCanvas" width="750" height="750"></canvas>
+        <button id="resetButton">Reset Game</button>
+        <p id="timer">Time: 3s</p>
+    </div>
+
+    <div id="chartContainer">
+        <div id="distplot"></div>
+    </div>
+
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script>
+        const canvas = document.getElementById('targetCanvas');
+        const ctx = canvas.getContext('2d');
+        const timerElement = document.getElementById('timer');
+        const resetButton = document.getElementById('resetButton');
+        const chartContainer = document.getElementById('chartContainer');
+        
+        const targetRadius = 75;
+        const gameDuration = 3; // seconds
+        let shots = [];
+        let targetPosition = { x: 250, y: 250 };
+        let timeLeft = gameDuration;
+        let roundCount = 0;
+        let gameInProgress = true;
+
+        let timerInterval;
+
+        function drawTarget() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear the canvas before drawing the target
+            const colors = ['#ffffff', '#ff0000', '#ffffff', '#ff0000'];
+            const radii = [targetRadius, targetRadius - 15, targetRadius - 30, targetRadius - 45];
+            for (let i = 0; i < colors.length; i++) {
+                ctx.beginPath();
+                ctx.arc(targetPosition.x, targetPosition.y, radii[i], 0, Math.PI * 2);
+                ctx.fillStyle = colors[i];
+                ctx.fill();
+            }
+        }
+
+        function drawShot(x, y) {
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.fillStyle = 'blue';
+            ctx.fill();
+        }
+
+        function updateTimer() {
+            if (timeLeft > 0) {
+                timeLeft--;
+                timerElement.textContent = `Time: ${timeLeft}s`;
+            } else {
+                clearInterval(timerInterval);
+                roundCount++;
+                if (roundCount < 8) {  // Change from 15 to 8 rounds
+                    moveTarget();
+                    timeLeft = gameDuration;
+                    timerInterval = setInterval(updateTimer, 1000);
+                } else {
+                    showResults();  // Show results after 8 rounds
+                }
+            }
+        }
+
+        function moveTarget() {
+            targetPosition = {
+                x: Math.random() * (canvas.width - targetRadius * 2) + targetRadius,
+                y: Math.random() * (canvas.height - targetRadius * 2) + targetRadius
+            };
+            drawTarget();
+        }
+
+        function recordShot(x, y) {
+            fetch('http://127.0.0.1:8000/shoot', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    x: x,
+                    y: y,
+                    target_x: targetPosition.x,
+                    target_y: targetPosition.y
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                shots.push(data.distance);
+            });
+        }
+
+        function showResults() {
+            // Fetch shots from the backend
+            fetch('http://127.0.0.1:8000/shots')
+                .then(response => response.json())
+                .then(data => {
+                    const shotDistances = data.shots;
+                    if (shotDistances.length > 0) {
+                        chartContainer.style.display = 'block';
+                        const trace = {
+                            x: shotDistances,
+                            type: 'histogram',
+                            histnorm: 'probability density',
+                            opacity: 0.75,
+                            marker: { color: 'blue' },
+                            name: 'Shot Distances'
+                        };
+
+                        const layout = {
+                            title: 'Shot Distance Distribution',
+                            xaxis: { title: 'Distance from Bullseye (units)' },
+                            yaxis: { title: 'Probability Density' },
+                            bargap: 0.2,
+                        };
+
+                        const data = [trace];
+                        Plotly.newPlot('distplot', data, layout);
+                    } else {
+                        alert('No shots to display.');
+                    }
+                });
+            gameInProgress = false;
+        }
+
+        canvas.addEventListener('click', (event) => {
+            if (!gameInProgress) return; // Don't allow shooting after game ends
+
+            const x = event.offsetX;
+            const y = event.offsetY;
+            drawShot(x, y);
+            recordShot(x, y);
+        });
+
+        resetButton.addEventListener('click', () => {
+            if (!gameInProgress) {
+                // Reset the game only if it has ended
+                shots = [];
+                roundCount = 0;
+                gameInProgress = true;
+                chartContainer.style.display = 'none';
+                moveTarget();
+                clearInterval(timerInterval);
+                timeLeft = gameDuration;
+                timerInterval = setInterval(updateTimer, 1000);
+            }
+        });
+
+        // Start the game
+        drawTarget();
+        timerInterval = setInterval(updateTimer, 1000);
+    </script>
+</body>
+</html>
